@@ -1,0 +1,96 @@
+#!/bin/bash
+
+ROOT=$(git rev-parse --show-toplevel)
+echo "Root:  $ROOT"
+VALID_ENVS=("dev" "prod")
+
+# Disable the --with-registry-auth flag
+NO_AUTH=0
+ENV=""
+ARGS=""
+
+usage() {
+	local envs=$(sed 's/ /, /g' <<< "${VALID_ENVS[@]}")
+
+	echo "Usage: $0 <env>"
+	echo "  env: $envs"
+	echo
+	echo "Options:"
+	echo "  -n: Disable the --with-registry-auth flag"
+	echo
+	echo "  Example: $0 dev"
+	echo "  Example: $0 prod"
+	echo
+	exit 1
+}
+
+parse_options() {
+	while getopts "n" opt "$@"; do
+		case $opt in
+		n)
+			NO_AUTH=1
+			;;
+		\?)
+			echo "Invalid option: -$OPTARG" >&2
+			exit 1
+			;;
+		esac
+	done
+	shift $((OPTIND - 1))
+	ARGS="$@"
+}
+
+parse_env() {
+	local in=$1
+	local found=0
+	for e in "${VALID_ENVS[@]}"; do
+		if [[ $e == $in ]]; then
+			found=1
+			break
+		fi
+	done
+	
+	if [[ $found == 0 ]]; then
+		echo "Invalid environment: $in"
+		exit 1
+	fi
+
+	if [[ -z $in ]]; then
+		usage
+	fi
+
+	ENV=$in
+
+	local env_file=$ROOT/envs/$ENV.yml
+
+	if [[ ! -f $env_file ]]; then
+		echo "Missing environment file: $env_file"
+		exit 1
+	fi
+
+	if [[ $ENV == "dev" ]]; then
+		NO_AUTH=1
+	fi
+}
+
+deploy() {
+	local cmd="docker stack deploy -c $ROOT/envs/$ENV.yml prestige"
+
+	if [[ $NO_AUTH == 0 ]]; then
+		cmd="$cmd --with-registry-auth"
+	fi
+
+	if [[ $ENV == "dev" ]]; then
+		cmd="$cmd --resolve-image=never"
+	fi
+
+	echo
+	echo "Deploying $ENV ($cmd) ..."
+	echo
+
+	eval "$cmd"
+}
+
+parse_options "$@"
+parse_env "$ARGS"
+deploy
